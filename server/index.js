@@ -10,20 +10,27 @@ const crypto = require('crypto');
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const app = express();
-const PORT = 3001;
-const SECRET_KEY = 'lumina-secret-key-change-this-in-prod';
+const PORT = process.env.PORT || 3001;
+const SECRET_KEY = process.env.JWT_SECRET || 'lumina-secret-key-change-this-in-prod';
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/storiesofunais';
 
 app.use(cors());
 app.use(express.json());
 
 // --- MongoDB Connection ---
+console.log('Connecting to database...');
 mongoose.connect(MONGODB_URI)
   .then(() => {
-    console.log('Connected to MongoDB');
+    console.log(`Connected to MongoDB at ${MONGODB_URI.split('@').pop().split('/')[0]}`);
     seedDatabase();
   })
-  .catch(err => console.error('MongoDB connection error:', err));
+  .catch(err => {
+    console.error('--- MONGODB CONNECTION ERROR ---');
+    console.error('Error:', err.message);
+    console.error('URI:', MONGODB_URI.replace(/:([^:@]{1,})@/, ':****@')); // Mask password if present
+    console.error('Tip: Make sure your MongoDB service is running or your IP is whitelisted (if Atlas).');
+    console.error('--------------------------------');
+  });
 
 // --- Seeding ---
 async function seedDatabase() {
