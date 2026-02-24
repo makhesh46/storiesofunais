@@ -289,12 +289,6 @@ app.post('/api/stories/:id/like', async (req, res) => {
 // --- Comment Routes ---
 app.get('/api/comments/:storyId', async (req, res) => {
   try {
-    const { data: comments, error } = await supabase
-      .from('comments')
-      .select('*')
-      .eq('story_id', req.params.storyId)
-      .order('created_at', { ascending: false });
-
       .order('created_at', { ascending: false });
 
     if (error) throw error;
@@ -339,8 +333,6 @@ app.get('/api/announcements', async (req, res) => {
     const { data: anns, error } = await supabase
       .from('announcements')
       .select('*')
-      .order('created_at', { ascending: false });
-
       .order('created_at', { ascending: false });
 
     if (error) throw error;
