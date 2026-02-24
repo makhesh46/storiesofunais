@@ -15,6 +15,31 @@ const SECRET_KEY = process.env.JWT_SECRET || 'lumina-secret-key-change-this-in-p
 app.use(cors());
 app.use(express.json());
 
+// --- Mapping Utilities ---
+const toCamel = (obj) => {
+  if (Array.isArray(obj)) return obj.map(toCamel);
+  if (obj !== null && typeof obj === 'object') {
+    return Object.keys(obj).reduce((acc, key) => {
+      const camelKey = key.replace(/_([a-z])/g, (g) => g[1].toUpperCase());
+      acc[camelKey] = toCamel(obj[key]);
+      return acc;
+    }, {});
+  }
+  return obj;
+};
+
+const toSnake = (obj) => {
+  if (Array.isArray(obj)) return obj.map(toSnake);
+  if (obj !== null && typeof obj === 'object') {
+    return Object.keys(obj).reduce((acc, key) => {
+      const snakeKey = key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+      acc[snakeKey] = toSnake(obj[key]);
+      return acc;
+    }, {});
+  }
+  return obj;
+};
+
 // --- Supabase Connection Check ---
 console.log('Using Supabase for database...');
 
@@ -73,7 +98,7 @@ app.post('/api/auth/login', async (req, res) => {
 
     if (user) {
       const token = jwt.sign(user, SECRET_KEY, { expiresIn: '1h' });
-      res.json({ token, user });
+      res.json({ token, user: toCamel(user) });
     } else {
       res.status(401).json({ message: 'Invalid credentials' });
     }
@@ -108,7 +133,7 @@ app.post('/api/auth/signup', async (req, res) => {
     if (error) throw error;
 
     const token = jwt.sign(newUser, SECRET_KEY, { expiresIn: '1h' });
-    res.json({ token, user: newUser });
+    res.json({ token, user: toCamel(newUser) });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -148,7 +173,7 @@ app.post('/api/auth/google', async (req, res) => {
     }
 
     const jwtToken = jwt.sign(user, SECRET_KEY, { expiresIn: '1h' });
-    res.json({ token: jwtToken, user });
+    res.json({ token: jwtToken, user: toCamel(user) });
   } catch (error) {
     console.error('Google Auth Error:', error);
     res.status(400).json({ message: 'Google Sign-In failed' });
@@ -165,7 +190,7 @@ app.get('/api/stories', async (req, res) => {
 
     const { data: stories, error } = await query.order('published_at', { ascending: false });
     if (error) throw error;
-    res.json(stories);
+    res.json(toCamel(stories));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -179,7 +204,7 @@ app.get('/api/stories/:id', async (req, res) => {
       .eq('id', req.params.id)
       .single();
 
-    if (story) res.json(story);
+    if (story) res.json(toCamel(story));
     else res.status(404).json({ message: 'Story not found' });
   } catch (error) {
     res.status(404).json({ message: 'Invalid ID format' });
@@ -191,7 +216,7 @@ app.post('/api/stories', authenticateToken, requireAdmin, async (req, res) => {
     const { data: newStory, error } = await supabase
       .from('stories')
       .insert({
-        ...req.body,
+        ...toSnake(req.body),
         author_id: req.user.id,
         author_name: req.user.name,
         views: 0,
@@ -201,7 +226,7 @@ app.post('/api/stories', authenticateToken, requireAdmin, async (req, res) => {
       .single();
 
     if (error) throw error;
-    res.json(newStory);
+    res.json(toCamel(newStory));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -211,12 +236,12 @@ app.put('/api/stories/:id', authenticateToken, requireAdmin, async (req, res) =>
   try {
     const { data: updated, error } = await supabase
       .from('stories')
-      .update({ ...req.body, updated_at: new Date() })
+      .update({ ...toSnake(req.body), updated_at: new Date() })
       .eq('id', req.params.id)
       .select()
       .single();
 
-    if (updated) res.json(updated);
+    if (updated) res.json(toCamel(updated));
     else res.status(404).json({ message: 'Story not found' });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -270,8 +295,10 @@ app.get('/api/comments/:storyId', async (req, res) => {
       .eq('story_id', req.params.storyId)
       .order('created_at', { ascending: false });
 
+      .order('created_at', { ascending: false });
+
     if (error) throw error;
-    res.json(comments);
+    res.json(toCamel(comments));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -282,7 +309,7 @@ app.post('/api/comments', authenticateToken, async (req, res) => {
     const { data: newComment, error } = await supabase
       .from('comments')
       .insert({
-        ...req.body,
+        ...toSnake(req.body),
         user_id: req.user.id,
         user_name: req.user.name
       })
@@ -290,7 +317,7 @@ app.post('/api/comments', authenticateToken, async (req, res) => {
       .single();
 
     if (error) throw error;
-    res.json(newComment);
+    res.json(toCamel(newComment));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -314,8 +341,10 @@ app.get('/api/announcements', async (req, res) => {
       .select('*')
       .order('created_at', { ascending: false });
 
+      .order('created_at', { ascending: false });
+
     if (error) throw error;
-    res.json(anns);
+    res.json(toCamel(anns));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -325,12 +354,12 @@ app.post('/api/announcements', authenticateToken, requireAdmin, async (req, res)
   try {
     const { data: newAnn, error } = await supabase
       .from('announcements')
-      .insert(req.body)
+      .insert(toSnake(req.body))
       .select()
       .single();
 
     if (error) throw error;
-    res.json(newAnn);
+    res.json(toCamel(newAnn));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
