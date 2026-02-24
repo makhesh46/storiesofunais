@@ -2,8 +2,7 @@ const express = require('express');
 require('dotenv').config();
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
-const mongoose = require('mongoose');
-const { User, Story, Comment, Announcement } = require('./models');
+const supabase = require('./supabase');
 const { OAuth2Client } = require('google-auth-library');
 const crypto = require('crypto');
 
@@ -12,32 +11,24 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 const app = express();
 const PORT = process.env.PORT || 3001;
 const SECRET_KEY = process.env.JWT_SECRET || 'lumina-secret-key-change-this-in-prod';
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/storiesofunais';
 
 app.use(cors());
 app.use(express.json());
 
-// --- MongoDB Connection ---
-console.log('Connecting to database...');
-mongoose.connect(MONGODB_URI)
-  .then(() => {
-    console.log(`Connected to MongoDB at ${MONGODB_URI.split('@').pop().split('/')[0]}`);
-    seedDatabase();
-  })
-  .catch(err => {
-    console.error('--- MONGODB CONNECTION ERROR ---');
-    console.error('Error:', err.message);
-    console.error('URI:', MONGODB_URI.replace(/:([^:@]{1,})@/, ':****@')); // Mask password if present
-    console.error('Tip: Make sure your MongoDB service is running or your IP is whitelisted (if Atlas).');
-    console.error('--------------------------------');
-  });
+// --- Supabase Connection Check ---
+console.log('Using Supabase for database...');
 
-// --- Seeding ---
+// --- Seeding (Supabase doesn't need manual seed on every start if table script was run, but keeps logic for admin check) ---
 async function seedDatabase() {
-  const adminExists = await User.findOne({ email: 'storiesofunais@gmail.com' });
-  if (!adminExists) {
+  const { data: adminExists, error } = await supabase
+    .from('users')
+    .select('id')
+    .eq('email', 'storiesofunais@gmail.com')
+    .single();
+
+  if (!adminExists && !error) {
     console.log('Seeding admin user...');
-    await User.create({
+    await supabase.from('users').insert({
       email: 'storiesofunais@gmail.com',
       password: 'storiesofunais@gmail.com', // Hash this in production
       name: 'Unais',
@@ -46,6 +37,9 @@ async function seedDatabase() {
     });
   }
 }
+
+seedDatabase();
+
 
 // --- Middleware ---
 const authenticateToken = (req, res, next) => {
@@ -70,13 +64,16 @@ const requireAdmin = (req, res, next) => {
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
   try {
-    // In production, use bcrypt.compare here
-    const user = await User.findOne({ email, password });
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', email)
+      .eq('password', password) // In production, use hashed password comparison
+      .single();
 
     if (user) {
-      const userObj = user.toJSON();
-      const token = jwt.sign(userObj, SECRET_KEY, { expiresIn: '1h' });
-      res.json({ token, user: userObj });
+      const token = jwt.sign(user, SECRET_KEY, { expiresIn: '1h' });
+      res.json({ token, user });
     } else {
       res.status(401).json({ message: 'Invalid credentials' });
     }
@@ -88,20 +85,30 @@ app.post('/api/auth/login', async (req, res) => {
 app.post('/api/auth/signup', async (req, res) => {
   const { email, password, name } = req.body;
   try {
-    const existing = await User.findOne({ email });
+    const { data: existing } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', email)
+      .single();
+
     if (existing) return res.status(400).json({ message: 'Email already taken' });
 
-    const newUser = await User.create({
-      email,
-      password, // Hash in prod
-      name,
-      role: 'viewer',
-      avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`
-    });
+    const { data: newUser, error } = await supabase
+      .from('users')
+      .insert({
+        email,
+        password, // Hash in prod
+        name,
+        role: 'viewer',
+        avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`
+      })
+      .select()
+      .single();
 
-    const userObj = newUser.toJSON();
-    const token = jwt.sign(userObj, SECRET_KEY, { expiresIn: '1h' });
-    res.json({ token, user: userObj });
+    if (error) throw error;
+
+    const token = jwt.sign(newUser, SECRET_KEY, { expiresIn: '1h' });
+    res.json({ token, user: newUser });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -117,20 +124,31 @@ app.post('/api/auth/google', async (req, res) => {
     const payload = ticket.getPayload();
     const { email, name, picture } = payload;
 
-    let user = await User.findOne({ email });
+    let { data: user } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', email)
+      .single();
+
     if (!user) {
-      user = await User.create({
-        email,
-        name,
-        avatar: picture,
-        role: 'viewer',
-        password: crypto.randomBytes(16).toString('hex'), // Random password for OAuth users
-      });
+      const { data: newUser, error } = await supabase
+        .from('users')
+        .insert({
+          email,
+          name,
+          avatar: picture,
+          role: 'viewer',
+          password: crypto.randomBytes(16).toString('hex'),
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      user = newUser;
     }
 
-    const userObj = user.toJSON();
-    const jwtToken = jwt.sign(userObj, SECRET_KEY, { expiresIn: '1h' });
-    res.json({ token: jwtToken, user: userObj });
+    const jwtToken = jwt.sign(user, SECRET_KEY, { expiresIn: '1h' });
+    res.json({ token: jwtToken, user });
   } catch (error) {
     console.error('Google Auth Error:', error);
     res.status(400).json({ message: 'Google Sign-In failed' });
@@ -140,10 +158,13 @@ app.post('/api/auth/google', async (req, res) => {
 // --- Story Routes ---
 app.get('/api/stories', async (req, res) => {
   try {
-    const query = {};
-    if (req.query.status) query.status = req.query.status;
+    let query = supabase.from('stories').select('*');
+    if (req.query.status) {
+      query = query.eq('status', req.query.status);
+    }
 
-    const stories = await Story.find(query).sort({ publishedAt: -1, createdAt: -1 });
+    const { data: stories, error } = await query.order('published_at', { ascending: false });
+    if (error) throw error;
     res.json(stories);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -152,7 +173,12 @@ app.get('/api/stories', async (req, res) => {
 
 app.get('/api/stories/:id', async (req, res) => {
   try {
-    const story = await Story.findById(req.params.id);
+    const { data: story, error } = await supabase
+      .from('stories')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+
     if (story) res.json(story);
     else res.status(404).json({ message: 'Story not found' });
   } catch (error) {
@@ -162,13 +188,19 @@ app.get('/api/stories/:id', async (req, res) => {
 
 app.post('/api/stories', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const newStory = await Story.create({
-      ...req.body,
-      authorId: req.user.id,
-      authorName: req.user.name,
-      views: 0,
-      likes: 0
-    });
+    const { data: newStory, error } = await supabase
+      .from('stories')
+      .insert({
+        ...req.body,
+        author_id: req.user.id,
+        author_name: req.user.name,
+        views: 0,
+        likes: 0
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
     res.json(newStory);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -177,11 +209,13 @@ app.post('/api/stories', authenticateToken, requireAdmin, async (req, res) => {
 
 app.put('/api/stories/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const updated = await Story.findByIdAndUpdate(
-      req.params.id,
-      { ...req.body, updatedAt: new Date() },
-      { new: true }
-    );
+    const { data: updated, error } = await supabase
+      .from('stories')
+      .update({ ...req.body, updated_at: new Date() })
+      .eq('id', req.params.id)
+      .select()
+      .single();
+
     if (updated) res.json(updated);
     else res.status(404).json({ message: 'Story not found' });
   } catch (error) {
@@ -191,7 +225,8 @@ app.put('/api/stories/:id', authenticateToken, requireAdmin, async (req, res) =>
 
 app.delete('/api/stories/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    await Story.findByIdAndDelete(req.params.id);
+    const { error } = await supabase.from('stories').delete().eq('id', req.params.id);
+    if (error) throw error;
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -200,7 +235,14 @@ app.delete('/api/stories/:id', authenticateToken, requireAdmin, async (req, res)
 
 app.post('/api/stories/:id/view', async (req, res) => {
   try {
-    await Story.findByIdAndUpdate(req.params.id, { $inc: { views: 1 } });
+    const { error } = await supabase.rpc('increment_story_views', { story_id: req.params.id });
+    // Note: If RPC is not set up, using update with current value + 1 is harder due to no $inc in Supabase update directly easily without a function
+    // For now, let's assume update with raw increment if we can, or just update logic.
+    // Actually, simple update:
+    const { data: story } = await supabase.from('stories').select('views').eq('id', req.params.id).single();
+    if (story) {
+      await supabase.from('stories').update({ views: (story.views || 0) + 1 }).eq('id', req.params.id);
+    }
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -209,7 +251,10 @@ app.post('/api/stories/:id/view', async (req, res) => {
 
 app.post('/api/stories/:id/like', async (req, res) => {
   try {
-    await Story.findByIdAndUpdate(req.params.id, { $inc: { likes: 1 } });
+    const { data: story } = await supabase.from('stories').select('likes').eq('id', req.params.id).single();
+    if (story) {
+      await supabase.from('stories').update({ likes: (story.likes || 0) + 1 }).eq('id', req.params.id);
+    }
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -219,7 +264,13 @@ app.post('/api/stories/:id/like', async (req, res) => {
 // --- Comment Routes ---
 app.get('/api/comments/:storyId', async (req, res) => {
   try {
-    const comments = await Comment.find({ storyId: req.params.storyId }).sort({ createdAt: -1 });
+    const { data: comments, error } = await supabase
+      .from('comments')
+      .select('*')
+      .eq('story_id', req.params.storyId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
     res.json(comments);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -228,11 +279,17 @@ app.get('/api/comments/:storyId', async (req, res) => {
 
 app.post('/api/comments', authenticateToken, async (req, res) => {
   try {
-    const newComment = await Comment.create({
-      ...req.body,
-      userId: req.user.id,
-      userName: req.user.name
-    });
+    const { data: newComment, error } = await supabase
+      .from('comments')
+      .insert({
+        ...req.body,
+        user_id: req.user.id,
+        user_name: req.user.name
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
     res.json(newComment);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -241,7 +298,8 @@ app.post('/api/comments', authenticateToken, async (req, res) => {
 
 app.delete('/api/comments/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    await Comment.findByIdAndDelete(req.params.id);
+    const { error } = await supabase.from('comments').delete().eq('id', req.params.id);
+    if (error) throw error;
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -251,7 +309,12 @@ app.delete('/api/comments/:id', authenticateToken, requireAdmin, async (req, res
 // --- Announcement Routes ---
 app.get('/api/announcements', async (req, res) => {
   try {
-    const anns = await Announcement.find({}).sort({ createdAt: -1 });
+    const { data: anns, error } = await supabase
+      .from('announcements')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
     res.json(anns);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -260,7 +323,13 @@ app.get('/api/announcements', async (req, res) => {
 
 app.post('/api/announcements', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const newAnn = await Announcement.create(req.body);
+    const { data: newAnn, error } = await supabase
+      .from('announcements')
+      .insert(req.body)
+      .select()
+      .single();
+
+    if (error) throw error;
     res.json(newAnn);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -269,7 +338,8 @@ app.post('/api/announcements', authenticateToken, requireAdmin, async (req, res)
 
 app.delete('/api/announcements/:id', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    await Announcement.findByIdAndDelete(req.params.id);
+    const { error } = await supabase.from('announcements').delete().eq('id', req.params.id);
+    if (error) throw error;
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ message: error.message });
