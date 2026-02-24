@@ -288,17 +288,18 @@ app.post('/api/stories/:id/like', async (req, res) => {
 
 // --- Comment Routes ---
 app.get('/api/comments/:storyId', async (req, res) => {
-  const { data: comments, error } = await supabase
-    .from('comments')
-    .select('*')
-    .eq('story_id', req.params.storyId)
-    .order('created_at', { ascending: false });
+  try {
+    const { data: comments, error } = await supabase
+      .from('comments')
+      .select('*')
+      .eq('story_id', req.params.storyId)
+      .order('created_at', { ascending: false });
 
-  if (error) throw error;
-  res.json(toCamel(comments));
-} catch (error) {
-  res.status(500).json({ message: error.message });
-}
+    if (error) throw error;
+    res.json(toCamel(comments));
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
 });
 
 app.post('/api/comments', authenticateToken, async (req, res) => {
