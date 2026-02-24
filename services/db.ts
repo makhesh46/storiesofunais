@@ -1,7 +1,7 @@
 import { Story, User, Comment, Announcement } from '../types';
 import { MOCK_STORIES, MOCK_USERS, MOCK_ANNOUNCEMENTS, MOCK_COMMENTS } from './mockData';
 
-const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api';
+const API_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
 // --- Local Storage Implementation (Fallback) ---
 const KEYS = {
@@ -27,13 +27,7 @@ const setLS = (key: string, data: any[]) => localStorage.setItem(key, JSON.strin
 
 // --- Hybrid Client ---
 
-// We use a circuit breaker to stop trying the API if it's down
-let isOffline = false;
-
 const request = async <T>(endpoint: string, options: RequestInit = {}, fallback: () => Promise<T> | T): Promise<T> => {
-  if (isOffline) {
-    return fallback();
-  }
 
   try {
     const token = localStorage.getItem(KEYS.TOKEN);
@@ -57,8 +51,7 @@ const request = async <T>(endpoint: string, options: RequestInit = {}, fallback:
   } catch (error: any) {
     // If it's a network error (Failed to fetch), switch to offline mode
     if (error.message === 'Failed to fetch' || error.message.includes('NetworkError')) {
-      console.warn(`Backend unreachable (${endpoint}). Switching to Offline Mode.`);
-      isOffline = true;
+      console.warn(`Backend unreachable (${endpoint}). Falling back to Local Storage.`);
       return fallback();
     }
     throw error;
