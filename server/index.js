@@ -187,6 +187,9 @@ app.get('/api/stories', async (req, res) => {
     if (req.query.status) {
       query = query.eq('status', req.query.status);
     }
+    if (req.query.deviceId) {
+      query = query.eq('device_id', req.query.deviceId);
+    }
 
     const { data: stories, error } = await query.order('published_at', { ascending: false });
     if (error) throw error;
@@ -213,10 +216,12 @@ app.get('/api/stories/:id', async (req, res) => {
 
 app.post('/api/stories', authenticateToken, requireAdmin, async (req, res) => {
   try {
+    const { device_id, ...storyData } = toSnake(req.body);
     const { data: newStory, error } = await supabase
       .from('stories')
       .insert({
-        ...toSnake(req.body),
+        ...storyData,
+        device_id: device_id || req.body.deviceId,
         author_id: req.user.id,
         author_name: req.user.name,
         views: 0,

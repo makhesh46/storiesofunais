@@ -10,7 +10,17 @@ const KEYS = {
   COMMENTS: 'lumina_comments',
   ANNOUNCEMENTS: 'lumina_announcements',
   CURRENT_USER: 'lumina_current_user',
-  TOKEN: 'lumina_token'
+  TOKEN: 'lumina_token',
+  DEVICE_ID: 'lumina_device_id'
+};
+
+const getDeviceId = () => {
+  let id = localStorage.getItem(KEYS.DEVICE_ID);
+  if (!id) {
+    id = `dev-${Math.random().toString(36).substr(2, 9)}-${Date.now()}`;
+    localStorage.setItem(KEYS.DEVICE_ID, id);
+  }
+  return id;
 };
 
 // Initialize LocalStorage with mocks if empty
@@ -60,11 +70,13 @@ const request = async <T>(endpoint: string, options: RequestInit = {}, fallback:
 
 export const DB = {
   stories: {
-    getAll: () => request<Story[]>('/stories', {}, () => getLS(KEYS.STORIES)),
+    getAll: () => request<Story[]>(`/stories?deviceId=${getDeviceId()}`, {}, () => {
+      return getLS<Story>(KEYS.STORIES).filter(s => s.deviceId === getDeviceId());
+    }),
 
-    getPublished: () => request<Story[]>('/stories?status=published', {}, () => {
+    getPublished: () => request<Story[]>(`/stories?status=published&deviceId=${getDeviceId()}`, {}, () => {
       return getLS<Story>(KEYS.STORIES)
-        .filter(s => s.status === 'published')
+        .filter(s => s.status === 'published' && s.deviceId === getDeviceId())
         .sort((a, b) => new Date(b.publishedAt || 0).getTime() - new Date(a.publishedAt || 0).getTime());
     }),
 
@@ -80,6 +92,7 @@ export const DB = {
       const newStory: Story = {
         ...story,
         id: `story-${Date.now()}`,
+        deviceId: getDeviceId(),
         views: 0,
         likes: 0,
         createdAt: new Date().toISOString(),

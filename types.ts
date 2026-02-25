@@ -23,6 +23,7 @@ export interface Story {
   views: number;
   likes: number;
   tags: string[];
+  deviceId: string;
 }
 
 export interface Comment {
