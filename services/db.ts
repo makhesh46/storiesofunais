@@ -74,9 +74,9 @@ export const DB = {
       return getLS<Story>(KEYS.STORIES).filter(s => s.deviceId === getDeviceId());
     }),
 
-    getPublished: () => request<Story[]>(`/stories?status=published&deviceId=${getDeviceId()}`, {}, () => {
+    getPublished: () => request<Story[]>(`/stories?status=published`, {}, () => {
       return getLS<Story>(KEYS.STORIES)
-        .filter(s => s.status === 'published' && s.deviceId === getDeviceId())
+        .filter(s => s.status === 'published')
         .sort((a, b) => new Date(b.publishedAt || 0).getTime() - new Date(a.publishedAt || 0).getTime());
     }),
 
