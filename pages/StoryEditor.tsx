@@ -8,7 +8,7 @@ export const StoryEditor: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
-  
+
   const [formData, setFormData] = useState({
     title: '',
     excerpt: '',
@@ -39,8 +39,13 @@ export const StoryEditor: React.FC = () => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSaving(true);
+    setSaveError('');
     const storyData = {
       ...formData,
       tags: formData.tags.split(',').map(t => t.trim()).filter(Boolean),
@@ -48,16 +53,23 @@ export const StoryEditor: React.FC = () => {
       authorName: user?.name || 'Admin',
       publishedAt: formData.status === 'published' ? new Date().toISOString() : undefined
     };
-
-    // @ts-ignore - status type matching
     const payload = { ...storyData, status: formData.status as 'draft' | 'published' };
-
-    if (id) {
-      await DB.stories.update(id, payload);
-    } else {
-      await DB.stories.create(payload);
+    try {
+      if (id) {
+        await DB.stories.update(id, payload);
+      } else {
+        await DB.stories.create(payload);
+      }
+      navigate('/admin');
+    } catch (error: any) {
+      console.error('Save failed:', error);
+      if (error.message?.includes('401') || error.message?.includes('403')) {
+        setSaveError('⚠️ Session expired. Please log out and log back in, then try again.');
+      } else {
+        setSaveError(error.message || 'Failed to save story. Please try again.');
+      }
+      setSaving(false);
     }
-    navigate('/admin');
   };
 
   return (
@@ -130,7 +142,7 @@ export const StoryEditor: React.FC = () => {
             <div>
               <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">Cover Image URL</label>
               <div className="flex gap-2 mb-2">
-                 <input
+                <input
                   name="coverImage"
                   value={formData.coverImage}
                   onChange={handleChange}
@@ -154,9 +166,18 @@ export const StoryEditor: React.FC = () => {
               />
             </div>
 
-            <button type="submit" className="w-full flex items-center justify-center gap-2 py-3 bg-primary-600 text-white rounded-lg font-bold hover:bg-primary-700 transition-colors shadow-lg shadow-primary-600/20">
+            {saveError && (
+              <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-400">
+                {saveError}
+              </div>
+            )}
+            <button
+              type="submit"
+              disabled={saving}
+              className="w-full flex items-center justify-center gap-2 py-3 bg-primary-600 text-white rounded-lg font-bold hover:bg-primary-700 transition-colors shadow-lg shadow-primary-600/20 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
               <Save className="h-4 w-4" />
-              Save Story
+              {saving ? 'Saving...' : 'Save Story'}
             </button>
           </div>
         </div>
