@@ -70,8 +70,8 @@ const request = async <T>(endpoint: string, options: RequestInit = {}, fallback:
 
 export const DB = {
   stories: {
-    getAll: () => request<Story[]>(`/stories?deviceId=${getDeviceId()}`, {}, () => {
-      return getLS<Story>(KEYS.STORIES).filter(s => s.deviceId === getDeviceId());
+    getAll: () => request<Story[]>(`/stories`, {}, () => {
+      return getLS<Story>(KEYS.STORIES);
     }),
 
     getPublished: () => request<Story[]>(`/stories?status=published`, {}, () => {
