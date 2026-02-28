@@ -2,24 +2,59 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { DB } from '../services/db';
 import { Story, Announcement } from '../types';
-import { Plus, Edit3, Trash2, Eye, FileText, Megaphone, TrendingUp } from 'lucide-react';
+import { Plus, Edit3, Trash2, Eye, FileText, Megaphone, TrendingUp, AlertTriangle, X } from 'lucide-react';
+
+// --- Confirmation Modal ---
+interface ConfirmModalProps {
+  message: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+const ConfirmModal: React.FC<ConfirmModalProps> = ({ message, onConfirm, onCancel }) => (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+    <div className="bg-white dark:bg-stone-900 rounded-2xl shadow-2xl p-6 max-w-sm w-full mx-4 border border-stone-200 dark:border-stone-700">
+      <div className="flex items-center gap-3 mb-4">
+        <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-full">
+          <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
+        </div>
+        <h3 className="font-semibold text-stone-900 dark:text-white">Confirm Delete</h3>
+      </div>
+      <p className="text-sm text-stone-600 dark:text-stone-400 mb-6">{message}</p>
+      <div className="flex gap-3">
+        <button
+          onClick={onCancel}
+          className="flex-1 py-2 px-4 rounded-lg border border-stone-300 dark:border-stone-700 text-stone-700 dark:text-stone-300 text-sm font-medium hover:bg-stone-50 dark:hover:bg-stone-800 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={onConfirm}
+          className="flex-1 py-2 px-4 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition-colors"
+        >
+          Delete
+        </button>
+      </div>
+    </div>
+  </div>
+);
 
 export const AdminDashboard: React.FC = () => {
   const [stories, setStories] = useState<Story[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [newAnnouncement, setNewAnnouncement] = useState('');
   const [loading, setLoading] = useState(true);
+  const [confirmDelete, setConfirmDelete] = useState<{ id: string; type: 'story' | 'announcement'; label: string } | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const fetchData = async () => {
-    // Don't set loading to true here to avoid flickering on re-fetch actions
     try {
-        const [s, a] = await Promise.all([DB.stories.getAll(), DB.announcements.getAll()]);
-        setStories(s);
-        setAnnouncements(a);
+      const [s, a] = await Promise.all([DB.stories.getAll(), DB.announcements.getAll()]);
+      setStories(s);
+      setAnnouncements(a);
     } catch (error) {
-        console.error("Failed to fetch dashboard data", error);
+      console.error("Failed to fetch dashboard data", error);
     } finally {
-        setLoading(false);
+      setLoading(false);
     }
   };
 
@@ -27,17 +62,32 @@ export const AdminDashboard: React.FC = () => {
     fetchData();
   }, []);
 
-  const handleDeleteStory = async (id: string) => {
-    if (confirm('Are you sure you want to delete this story? This action cannot be undone.')) {
-      try {
-        await DB.stories.delete(id);
-        // Optimistic update
-        setStories(prev => prev.filter(s => s.id !== id));
-        await fetchData(); // Sync with server to be sure
-      } catch (error) {
-        console.error("Delete failed", error);
-        alert("Failed to delete story. Please try again.");
+  const handleDeleteStory = (id: string, title: string) => {
+    setConfirmDelete({ id, type: 'story', label: title });
+  };
+
+  const handleDeleteAnnouncement = (id: string) => {
+    setConfirmDelete({ id, type: 'announcement', label: 'this announcement' });
+  };
+
+  const executeDelete = async () => {
+    if (!confirmDelete) return;
+    setDeleteLoading(true);
+    try {
+      if (confirmDelete.type === 'story') {
+        await DB.stories.delete(confirmDelete.id);
+        setStories(prev => prev.filter(s => s.id !== confirmDelete.id));
+        await fetchData();
+      } else {
+        await DB.announcements.delete(confirmDelete.id);
+        setAnnouncements(prev => prev.filter(a => a.id !== confirmDelete.id));
       }
+    } catch (error: any) {
+      console.error("Delete failed", error);
+      alert("Failed to delete. Error: " + error.message);
+    } finally {
+      setDeleteLoading(false);
+      setConfirmDelete(null);
     }
   };
 
@@ -45,23 +95,11 @@ export const AdminDashboard: React.FC = () => {
     e.preventDefault();
     if (!newAnnouncement.trim()) return;
     try {
-        await DB.announcements.create(newAnnouncement);
-        setNewAnnouncement('');
-        fetchData();
+      await DB.announcements.create(newAnnouncement);
+      setNewAnnouncement('');
+      fetchData();
     } catch (error) {
-        alert("Failed to post announcement.");
-    }
-  };
-
-  const handleDeleteAnnouncement = async (id: string) => {
-    if (confirm('Delete this announcement?')) {
-        try {
-            await DB.announcements.delete(id);
-            // Optimistic update
-            setAnnouncements(prev => prev.filter(a => a.id !== id));
-        } catch (error) {
-            alert("Failed to delete announcement.");
-        }
+      alert("Failed to post announcement.");
     }
   };
 
@@ -72,6 +110,15 @@ export const AdminDashboard: React.FC = () => {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-12">
+      {/* Confirm Modal */}
+      {confirmDelete && (
+        <ConfirmModal
+          message={`Are you sure you want to delete "${confirmDelete.label}"? This action cannot be undone.`}
+          onConfirm={executeDelete}
+          onCancel={() => setConfirmDelete(null)}
+        />
+      )}
+
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-serif font-bold text-stone-900 dark:text-white">Admin Dashboard</h1>
         <Link to="/admin/story/new" className="flex items-center gap-2 bg-primary-600 text-white px-4 py-2 rounded-lg hover:bg-primary-700 transition-colors shadow-sm">
@@ -134,11 +181,10 @@ export const AdminDashboard: React.FC = () => {
                       <div className="text-xs text-stone-500 truncate max-w-xs">{new Date(story.createdAt).toLocaleDateString()}</div>
                     </td>
                     <td className="px-6 py-4">
-                      <span className={`px-2 py-1 text-xs rounded-full font-medium ${
-                        story.status === 'published' 
-                          ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' 
+                      <span className={`px-2 py-1 text-xs rounded-full font-medium ${story.status === 'published'
+                          ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
                           : 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-400'
-                      }`}>
+                        }`}>
                         {story.status}
                       </span>
                     </td>
@@ -153,8 +199,8 @@ export const AdminDashboard: React.FC = () => {
                         <Link to={`/admin/story/edit/${story.id}`} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors dark:hover:bg-blue-900/20">
                           <Edit3 className="h-4 w-4" />
                         </Link>
-                        <button 
-                          onClick={() => handleDeleteStory(story.id)} 
+                        <button
+                          onClick={() => handleDeleteStory(story.id, story.title)}
                           className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors dark:hover:bg-red-900/20"
                           aria-label="Delete story"
                         >
@@ -165,11 +211,11 @@ export const AdminDashboard: React.FC = () => {
                   </tr>
                 ))}
                 {stories.length === 0 && (
-                    <tr>
-                        <td colSpan={4} className="px-6 py-8 text-center text-stone-500">
-                            No stories found. Create your first one!
-                        </td>
-                    </tr>
+                  <tr>
+                    <td colSpan={4} className="px-6 py-8 text-center text-stone-500">
+                      No stories found. Create your first one!
+                    </td>
+                  </tr>
                 )}
               </tbody>
             </table>
@@ -198,13 +244,16 @@ export const AdminDashboard: React.FC = () => {
               {announcements.map(ann => (
                 <div key={ann.id} className="p-3 bg-stone-50 dark:bg-stone-950 rounded-lg border border-stone-100 dark:border-stone-800 flex justify-between items-start gap-2 group">
                   <p className="text-sm text-stone-700 dark:text-stone-300">{ann.content}</p>
-                  <button onClick={() => handleDeleteAnnouncement(ann.id)} className="text-stone-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={() => handleDeleteAnnouncement(ann.id)}
+                    className="text-stone-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                  >
                     <Trash2 className="h-4 w-4" />
                   </button>
                 </div>
               ))}
               {announcements.length === 0 && (
-                  <p className="text-sm text-stone-400 text-center py-2">No announcements yet.</p>
+                <p className="text-sm text-stone-400 text-center py-2">No announcements yet.</p>
               )}
             </div>
           </div>
